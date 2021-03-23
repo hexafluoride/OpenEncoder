@@ -6,70 +6,48 @@
 #define LED_START_PIN PB3
 #define CHANNEL_COUNT 6
 
-#define RAW_BUFFER_SIZE 512
 
 HardwareSerial s1(PA10, PA9);
 
 void setup() {
-  setup_adc();
-
-  s1.begin(2000000);
 
   for (int i = 0; i < CHANNEL_COUNT; i++) {
     pinMode(LED_START_PIN + i, OUTPUT);
     pinMode(ANALOG_START_PIN + i, INPUT_ANALOG);
+    digitalWrite(LED_START_PIN + i, LOW);
   }
+
+  setup_adc();
+
+  s1.begin(2000000);
+
 }
 
 uint16_t raw_buf[RAW_BUFFER_SIZE];
 int last_written_raw = 0;
 
-int period = 5;
+int period = 10;
 int delay_us = 0;
 int inner_delay_us = 0;
 int switch_delay_us = 0;
-int switch_time = 2;
+int switch_time = 0;
+int calibrate = 5;
 
 void readChannelState(int channel) {
   int p = switch_time;
-  int start_index_r = last_written_raw;
+  int start_index_r = buf_index;
   int turn_on_index = 0;
   
   bool state = false;
-  
-  while (true) {
-    //auto val = analogRead(ANALOG_START_PIN + channel);
-    read_burst(channel, 1);
-    auto val = buf[conv_start];
-    raw_buf[last_written_raw] = val;
-    last_written_raw = (last_written_raw + 1) % RAW_BUFFER_SIZE;
-    p++;
-    
-    if (p > period) {
-      p = 0;
-      state = !state;
-      digitalWrite(LED_START_PIN + channel, state ? HIGH : LOW);
-  
-      if (state) {
-        if (switch_delay_us)
-          delayMicroseconds(switch_delay_us);
-        turn_on_index = last_written_raw - start_index_r;
-
-        if (turn_on_index < 0) {
-          turn_on_index += RAW_BUFFER_SIZE;
-        }
-      }
-
-      if (!state) {break;}
-    }
-
-    if (inner_delay_us)
-      delayMicroseconds(inner_delay_us);
-  }
 
   digitalWrite(LED_START_PIN + channel, LOW);
+  read_burst(channel, period - switch_time, calibrate);
+  turn_on_index = buf_index - start_index_r;
+  digitalWrite(LED_START_PIN + channel, HIGH);
+  read_burst(channel, period, calibrate);
+  digitalWrite(LED_START_PIN + channel, LOW);
 
-  int raw_count = last_written_raw - start_index_r;
+  int raw_count = buf_index - start_index_r;
   if (raw_count < 0) {
     raw_count += RAW_BUFFER_SIZE;
   }
@@ -88,7 +66,7 @@ void readChannelState(int channel) {
     if (_index >= RAW_BUFFER_SIZE) { 
       _index = _index - RAW_BUFFER_SIZE;
     }
-    s1.write(((uint8_t*)&raw_buf) + (_index * 2), 2);
+    s1.write(((uint8_t*)&buf) + (_index * 2), 2);
   }
 }
 
@@ -102,7 +80,7 @@ void loop() {
         next = ANALOG_START_PIN;
       }
 
-      analogRead(next);
+      //analogRead(next);
 
       if (delay_us)
         delayMicroseconds(delay_us);
@@ -110,7 +88,7 @@ void loop() {
 
   g++;
 
-  if (g % 20 == 0) {
+  if (g % 3 == 0) {
     g = 0;
 
     if (s1.available() > 0) {
@@ -145,6 +123,9 @@ void loop() {
           break;
         case 0xb5:
           switch_delay_us = s1.read();
+          break;
+        case 0xb6:
+          calibrate = s1.read();
           break;
       }
     }
